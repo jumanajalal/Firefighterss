@@ -1,0 +1,116 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression
+
+# Sample expense data
+months = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=np.float32) #Months
+expenses = np.array([2000, 2200, 2300, 2500, 2600, 2700, 2800, 3000, 3200, 3300], dtype=np.float32) #Monthly expenses
+
+# Categorize expenses
+def categorize_expense(amount):
+    if amount < 1000:
+        return 'Low'
+    elif amount < 2500:
+        return 'Medium'
+    else:
+        return 'High'
+
+# Set budget goals
+budget_goals = {
+    'Low': 1500,
+    'Medium': 3000,
+    'High': 5000
+}
+
+scaler = StandardScaler()
+expenses_scaled = scaler.fit_transform(expenses.reshape(-1, 1))
+
+# Split data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(months, expenses_scaled, test_size=0.2, random_state=42)
+
+class ExpenseDataset(Dataset):
+    def __init__(self, X, y):
+        self.X = torch.tensor(X, dtype=torch.float32)
+        self.y = torch.tensor(y, dtype=torch.float32)
+    
+    def __len__(self):
+        return len(self.X)
+    
+    def __getitem__(self, idx):
+        return self.X[idx], self.y[idx]
+
+# Creating Datasets and Dataloaders
+train_dataset = ExpenseDataset(X_train, y_train)
+test_dataset = ExpenseDataset(X_test, y_test)
+
+train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=4, shuffle=False)
+
+class PredictSpendingModel(nn.Module):
+    def __init__(self):
+        super(PredictSpendingModel, self).__init__()
+        self.linear = nn.Linear(1, 1) # Single input feature, single output (predicted expense)
+
+    def forward(self, x):
+        return self.linear(x)
+
+model = PredictSpendingModel()
+
+criterion = nn.MSELoss()
+optimizer = optim.SGD(model.parameters(), lr=0.01)
+
+# Training loop
+num_epochs = 100
+for epoch in range(num_epochs):
+    model.train()
+    running_loss = 0.0
+    for inputs, labels in train_loader:
+        optimizer.zero_grad()
+        outputs = model(inputs.view(-1, 1))
+        loss = criterion(outputs, labels.view(-1, 1))
+        loss.backward()
+        optimizer.step()
+        running_loss += loss.item()
+
+sklearn_model = LinearRegression()
+sklearn_model.fit(X_train.reshape(-1, 1), y_train.reshape(-1, 1))
+
+# Financial analysis
+model.eval()
+with torch.no_grad():
+    predicted_expenses = model(test_dataset.X.view(-1, 1)).numpy()
+    trend_line = sklearn_model.predict(X_test.reshape(-1, 1))
+
+predicted_expenses = scaler.inverse_transform(predicted_expenses)
+
+# Calculate budget analysis for test data
+total_expenses = scaler.inverse_transform(y_test) # Actual expenses
+budget_category = [categorize_expense(expense) for expense in total_expenses]
+budget_goal = [budget_goals[category] for category in budget_category]
+
+# Check budget status (completed, loss, profit)
+budget_status = ['Completed' if actual <= goal else 'Loss' if actual > goal else 'Profit'
+                 for actual, goal in zip(total_expenses, budget_goal)]
+
+# Print budget analysis results
+for i in range(len(X_test)):
+    print(f"Month: {int(X_test[i])}, Actual Expenses: {float(total_expenses[i]):.2f}, "
+          f"Budget Category: {budget_category[i]}, Budget Goal: {budget_goal[i]:.2f}, "
+          f"Budget Status: {budget_status[i]}")
+
+# Visualize predictions and actual spending
+plt.figure(figsize=(10, 6))
+plt.scatter(X_test, total_expenses, color='blue', label='Actual Expenses')
+plt.plot(X_test, predicted_expenses, color='red', label='PyTorch Predictions')
+plt.plot(X_test, trend_line, color='green', linestyle='--', label='SKlearn Linear Regression')
+plt.xlabel('Month')
+plt.ylabel('Expenses')
+plt.title('Predicted vs Actual Expenses')
+plt.legend()
+plt.show()
